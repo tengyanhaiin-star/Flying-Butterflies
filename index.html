@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>butterfly</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { width:100%; height:100%; overflow:hidden; background:#f0f4ff; touch-action:none; }
+    canvas { display:block; width:100%; height:100%; }
+    #hint { position:fixed; bottom:calc(18px + env(safe-area-inset-bottom));
+            left:50%; transform:translateX(-50%);
+            color:rgba(0,0,80,0.4); font:14px -apple-system,sans-serif;
+            pointer-events:none; white-space:nowrap; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── 防止 iOS 默认手势 ─────────────────────────────────────────
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('gesturestart', e => e.preventDefault());
+
+const canvas = document.getElementById('c');
+const W = () => window.innerWidth, H = () => window.innerHeight;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf0f4ff);
+
+const camera = new THREE.PerspectiveCamera(60, W()/H(), 0.1, 1000);
+camera.position.set(0, 0, 60);
+
+// iOS 上关闭 antialias 可大幅提升性能
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isIOS, powerPreference: 'high-performance' });
+renderer.setSize(W(), H());
+renderer.setPixelRatio(Math.min(devicePixelRatio, isIOS ? 1.5 : 2));
+
+window.addEventListener('resize', () => {
+  camera.aspect = W()/H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(), H());
+});
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const dl = new THREE.DirectionalLight(0xffffff, 1.0); dl.position.set(2,3,5); scene.add(dl);
+const bl = new THREE.DirectionalLight(0x4488ff, 0.4); bl.position.set(-2,-1,-3); scene.add(bl);
+
+// ── 纹理 ──────────────────────────────────────────────────────
+const WORLD_X0=-1.8,WORLD_X1=1.8,WORLD_Y0=-1.18,WORLD_Y1=1.35;
+const WORLD_W=WORLD_X1-WORLD_X0, WORLD_H=WORLD_Y1-WORLD_Y0;
+// iOS 用小纹理节省内存
+const SZ = isIOS ? 512 : 1024;
+function tx(x){ return ((x-WORLD_X0)/WORLD_W)*SZ; }
+function ty(y){ return (1-(y-WORLD_Y0)/WORLD_H)*SZ; }
+
+function applyWorldUV(geom){
+  const pos=geom.attributes.position;
+  const uv=new Float32Array(pos.count*2);
+  for(let i=0;i<pos.count;i++){
+    uv[i*2]  =(pos.getX(i)-WORLD_X0)/WORLD_W;
+    uv[i*2+1]=(pos.getY(i)-WORLD_Y0)/WORLD_H;
+  }
+  geom.setAttribute('uv',new THREE.BufferAttribute(uv,2));
+}
+
+function makeWingTexture(){
+  const c=document.createElement('canvas'); c.width=SZ; c.height=SZ;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#f0f4ff'; ctx.fillRect(0,0,SZ,SZ);
+  function drawSide(s){
+    ctx.save(); ctx.beginPath();
+    ctx.moveTo(tx(0),ty(0));
+    ctx.bezierCurveTo(tx(s*.08),ty(.25),tx(s*.50),ty(.95),tx(s*1.05),ty(1.20));
+    ctx.bezierCurveTo(tx(s*1.40),ty(1.35),tx(s*1.80),ty(1.10),tx(s*1.75),ty(.75));
+    ctx.bezierCurveTo(tx(s*1.68),ty(.48),tx(s*1.42),ty(.25),tx(s*1.22),ty(.10));
+    ctx.bezierCurveTo(tx(s*.88),ty(-.08),tx(s*.35),ty(-.04),tx(0),ty(0));
+    ctx.closePath(); ctx.clip();
+    const g1=ctx.createLinearGradient(tx(0),ty(1.35),tx(s*1.80),ty(-.08));
+    g1.addColorStop(0,'#0e2eaa');g1.addColorStop(.3,'#1a55ee');
+    g1.addColorStop(.6,'#2288ff');g1.addColorStop(.9,'#44aaff');
+    ctx.fillStyle=g1; ctx.fillRect(0,0,SZ,SZ);
+    const sh=ctx.createRadialGradient(tx(s*.75),ty(.75),0,tx(s*.75),ty(.75),SZ*.22);
+    sh.addColorStop(0,'rgba(180,235,255,.35)'); sh.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=sh; ctx.fillRect(0,0,SZ,SZ); ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(tx(0),ty(0));
+    ctx.bezierCurveTo(tx(s*.08),ty(.25),tx(s*.50),ty(.95),tx(s*1.05),ty(1.20));
+    ctx.bezierCurveTo(tx(s*1.40),ty(1.35),tx(s*1.80),ty(1.10),tx(s*1.75),ty(.75));
+    ctx.bezierCurveTo(tx(s*1.68),ty(.48),tx(s*1.42),ty(.25),tx(s*1.22),ty(.10));
+    ctx.bezierCurveTo(tx(s*.88),ty(-.08),tx(s*.35),ty(-.04),tx(0),ty(0));
+    ctx.closePath(); ctx.lineWidth=SZ/51; ctx.strokeStyle='#000'; ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,.75)'; ctx.lineWidth=SZ/170;
+    for(const[[x0,y0],[x1,y1],[x2,y2]] of [
+      [[0,0],[s*.20,.48],[s*.62,1.02]],[[0,0],[s*.32,.65],[s*.90,1.15]],
+      [[0,0],[s*.46,.76],[s*1.10,1.20]],[[0,0],[s*.62,.76],[s*1.30,1.00]],
+      [[0,0],[s*.78,.60],[s*1.58,.68]],[[0,0],[s*.82,.38],[s*1.65,.32]],
+    ]){ ctx.beginPath();ctx.moveTo(tx(x0),ty(y0));ctx.quadraticCurveTo(tx(x1),ty(y1),tx(x2),ty(y2));ctx.stroke(); }
+    ctx.fillStyle='rgba(255,255,255,.88)';
+    for(const[x,y] of [[s*1.58,.92],[s*1.68,.68],[s*1.68,.48],[s*1.52,.28],[s*1.28,.14],[s*1.05,.05]]){
+      ctx.beginPath();ctx.arc(tx(x),ty(y),SZ/102,0,Math.PI*2);ctx.fill();
+    }
+    // 后翅
+    ctx.save(); ctx.beginPath();
+    ctx.moveTo(tx(0),ty(0));
+    ctx.bezierCurveTo(tx(s*.05),ty(-.18),tx(s*.08),ty(-.55),tx(s*.15),ty(-.90));
+    ctx.bezierCurveTo(tx(s*.28),ty(-1.10),tx(s*.65),ty(-1.18),tx(s*.95),ty(-1.05));
+    ctx.bezierCurveTo(tx(s*1.18),ty(-.95),tx(s*1.28),ty(-.72),tx(s*1.20),ty(-.48));
+    ctx.bezierCurveTo(tx(s*1.10),ty(-.26),tx(s*.88),ty(-.14),tx(s*.62),ty(-.07));
+    ctx.bezierCurveTo(tx(s*.38),ty(.04),tx(s*.16),ty(.03),tx(0),ty(0));
+    ctx.closePath(); ctx.clip();
+    const g2=ctx.createLinearGradient(tx(0),ty(0),tx(s*1.28),ty(-1.18));
+    g2.addColorStop(0,'#0c28aa');g2.addColorStop(.3,'#1850ee');
+    g2.addColorStop(.6,'#2280ff');g2.addColorStop(.9,'#3aa8ee');
+    ctx.fillStyle=g2; ctx.fillRect(0,0,SZ,SZ);
+    const sh2=ctx.createRadialGradient(tx(s*.55),ty(-.55),0,tx(s*.55),ty(-.55),SZ*.15);
+    sh2.addColorStop(0,'rgba(160,225,255,.30)'); sh2.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=sh2; ctx.fillRect(0,0,SZ,SZ); ctx.restore();
+    ctx.beginPath();
+    ctx.moveTo(tx(0),ty(0));
+    ctx.bezierCurveTo(tx(s*.05),ty(-.18),tx(s*.08),ty(-.55),tx(s*.15),ty(-.90));
+    ctx.bezierCurveTo(tx(s*.28),ty(-1.10),tx(s*.65),ty(-1.18),tx(s*.95),ty(-1.05));
+    ctx.bezierCurveTo(tx(s*1.18),ty(-.95),tx(s*1.28),ty(-.72),tx(s*1.20),ty(-.48));
+    ctx.bezierCurveTo(tx(s*1.10),ty(-.26),tx(s*.88),ty(-.14),tx(s*.62),ty(-.07));
+    ctx.bezierCurveTo(tx(s*.38),ty(.04),tx(s*.16),ty(.03),tx(0),ty(0));
+    ctx.closePath(); ctx.lineWidth=SZ/51; ctx.strokeStyle='#000'; ctx.stroke();
+    ctx.strokeStyle='rgba(0,0,0,.72)'; ctx.lineWidth=SZ/170;
+    for(const[[x0,y0],[x1,y1],[x2,y2]] of [
+      [[0,0],[s*.10,-.48],[s*.16,-.92]],[[0,0],[s*.20,-.62],[s*.44,-1.08]],
+      [[0,0],[s*.36,-.72],[s*.74,-1.08]],[[0,0],[s*.52,-.65],[s*.95,-.90]],
+      [[0,0],[s*.64,-.46],[s*1.14,-.54]],[[0,0],[s*.62,-.26],[s*1.16,-.32]],
+    ]){ ctx.beginPath();ctx.moveTo(tx(x0),ty(y0));ctx.quadraticCurveTo(tx(x1),ty(y1),tx(x2),ty(y2));ctx.stroke(); }
+    ctx.beginPath();ctx.ellipse(tx(s*.20),ty(-1.00),SZ/36,SZ/51,.2,0,Math.PI*2);ctx.fillStyle='#ff3010';ctx.fill();
+    ctx.beginPath();ctx.ellipse(tx(s*.20),ty(-1.00),SZ/85,SZ/128,.2,0,Math.PI*2);ctx.fillStyle='#ffcc30';ctx.fill();
+    ctx.fillStyle='rgba(200,240,255,.88)';
+    for(const[x,y] of [[s*1.08,-.36],[s*1.18,-.54],[s*1.18,-.70],[s*1.10,-.86],[s*.92,-1.00],[s*.72,-1.08],[s*.50,-1.12]]){
+      ctx.beginPath();ctx.arc(tx(x),ty(y),SZ/102,0,Math.PI*2);ctx.fill();
+    }
+  }
+  drawSide(1); drawSide(-1);
+  return new THREE.CanvasTexture(c);
+}
+
+const wingTex = makeWingTexture();
+const wingMat = new THREE.MeshStandardMaterial({map:wingTex,side:THREE.DoubleSide,roughness:0.4,metalness:0.1});
+
+// iOS 用较少的几何分段
+const SEG = isIOS ? 32 : 64;
+
+function makeWingMesh(isLeft){
+  const s=isLeft?-1:1;
+  const fw=new THREE.Shape();
+  fw.moveTo(0,0);
+  fw.bezierCurveTo(s*.08,.25,s*.50,.95,s*1.05,1.20);
+  fw.bezierCurveTo(s*1.40,1.35,s*1.80,1.10,s*1.75,.75);
+  fw.bezierCurveTo(s*1.68,.48,s*1.42,.25,s*1.22,.10);
+  fw.bezierCurveTo(s*.88,-.08,s*.35,-.04,0,0);
+  const hw=new THREE.Shape();
+  hw.moveTo(0,0);
+  hw.bezierCurveTo(s*.05,-.18,s*.08,-.55,s*.15,-.90);
+  hw.bezierCurveTo(s*.28,-1.10,s*.65,-1.18,s*.95,-1.05);
+  hw.bezierCurveTo(s*1.18,-.95,s*1.28,-.72,s*1.20,-.48);
+  hw.bezierCurveTo(s*1.10,-.26,s*.88,-.14,s*.62,-.07);
+  hw.bezierCurveTo(s*.38,.04,s*.16,.03,0,0);
+  const fg=new THREE.ShapeGeometry(fw,SEG), hg=new THREE.ShapeGeometry(hw,SEG);
+  applyWorldUV(fg); applyWorldUV(hg);
+  const fm=new THREE.Mesh(fg,wingMat); fm.position.y=.01;
+  const hm=new THREE.Mesh(hg,wingMat); hm.position.y=-.01;
+  const g=new THREE.Group(); g.add(fm,hm); return g;
+}
+
+function makeCapsule(r,h,mat){
+  const g=new THREE.Group();
+  const seg=isIOS?8:16;
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,seg),mat));
+  const top=new THREE.Mesh(new THREE.SphereGeometry(r,seg,8),mat); top.position.y=h/2; g.add(top);
+  const bot=new THREE.Mesh(new THREE.SphereGeometry(r,seg,8),mat); bot.position.y=-h/2; g.add(bot);
+  return g;
+}
+
+function makeBody(){
+  const g=new THREE.Group();
+  const th=makeCapsule(.085,.10,new THREE.MeshStandardMaterial({color:0x050510,roughness:.7}));
+  th.position.set(0,0,.01); g.add(th);
+  const ab=makeCapsule(.052,.55,new THREE.MeshStandardMaterial({color:0x080818,roughness:.8}));
+  ab.position.set(0,-.41,0); g.add(ab);
+  const hd=new THREE.Mesh(new THREE.SphereGeometry(.068,isIOS?8:16,isIOS?8:16),
+    new THREE.MeshStandardMaterial({color:0x050510,roughness:.8}));
+  hd.position.set(0,.155,.01); g.add(hd);
+  const am=new THREE.MeshStandardMaterial({color:0x111122});
+  [-1,1].forEach(s=>{
+    const pts=new THREE.QuadraticBezierCurve3(
+      new THREE.Vector3(s*.03,.17,.02),new THREE.Vector3(s*.14,.48,.05),new THREE.Vector3(s*.17,.72,.02)
+    ).getPoints(isIOS?10:20);
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts),isIOS?10:20,.007,4,false),am));
+    const ball=new THREE.Mesh(new THREE.SphereGeometry(.020,6,6),am);
+    ball.position.copy(pts[pts.length-1]); g.add(ball);
+  });
+  return g;
+}
+
+// ── 常量 ──────────────────────────────────────────────────────
+const BOX = 25;
+const NUM_BUTTERFLIES = isIOS ? 30 : 100;
+const COLLISION_RADIUS = 2.0;
+const FLY_SPEED  = 0.05;
+const TURN_SPEED = 0.004;
+const HOVER_TIME = 1.0;
+
+
+// ── 边界箱 ────────────────────────────────────────────────────
+scene.add(new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(BOX*2,BOX*2,BOX*2)),
+  new THREE.LineBasicMaterial({color:0x223355,transparent:true,opacity:.3})
+));
+
+// ── 飞行工具函数 ──────────────────────────────────────────────
+function clampFlyDir(v){
+  v.y=Math.max(-.5,Math.min(.5,v.y));
+  if(Math.abs(v.x)<.001&&Math.abs(v.z)<.001){v.x=.1;v.z=.1;}
+  v.normalize();
+}
+
+function createButterfly(pos){
+  const fg=new THREE.Group(); scene.add(fg);
+  const bg=new THREE.Group(); fg.add(bg);
+  bg.add(makeWingMesh(true),makeWingMesh(false),makeBody());
+  fg.position.copy(pos);
+  const fd=new THREE.Vector3((Math.random()-.5)*2,0,(Math.random()-.5)*2).normalize();
+  return {
+    flightGroup:fg, butterfly:bg,
+    leftWing:bg.children[0], rightWing:bg.children[1],
+    flyDir:fd.clone(), targetFlyDir:fd.clone(),
+    headYaw:-Math.atan2(fd.x,fd.z), headPitch:0,
+    state:'fly', hoverTimer:0,
+    phase:Math.random()*Math.PI*2,
+  };
+}
+
+function genPositions(count,minDist){
+  const pts=[]; let tries=0;
+  while(pts.length<count&&tries<20000){
+    tries++;
+    const p=new THREE.Vector3((Math.random()-.5)*BOX*1.5,(Math.random()-.5)*BOX*1.5,(Math.random()-.5)*BOX*1.5);
+    if(pts.every(q=>p.distanceTo(q)>=minDist)) pts.push(p);
+  }
+  return pts;
+}
+
+const bflies = genPositions(NUM_BUTTERFLIES, COLLISION_RADIUS*2.5).map(createButterfly);
+
+function pickRandTarget(b){
+  const p=b.flightGroup.position;
+  const tc=new THREE.Vector3(-p.x,-p.y*.4,-p.z).normalize();
+  const r=new THREE.Vector3((Math.random()-.5)*1.5,(Math.random()-.5)*1.0,(Math.random()-.5)*1.5);
+  b.targetFlyDir=tc.add(r); clampFlyDir(b.targetFlyDir);
+}
+
+function updateB(b,dt,t,all){
+  const sv=Math.sin(2*Math.PI*5*t+b.phase);
+  const ang=(1-sv)/2*(Math.PI/2);
+  b.rightWing.rotation.y=-ang; b.leftWing.rotation.y=+ang;
+
+  if(b.state==='fly'){
+    b.flightGroup.position.addScaledVector(b.flyDir,FLY_SPEED);
+    const p=b.flightGroup.position;
+    const n=new THREE.Vector3();
+    if(p.x> BOX){p.x= BOX;n.x=-1;} if(p.x<-BOX){p.x=-BOX;n.x=1;}
+    if(p.y> BOX){p.y= BOX;n.y=-1;} if(p.y<-BOX){p.y=-BOX;n.y=1;}
+    if(p.z> BOX){p.z= BOX;n.z=-1;} if(p.z<-BOX){p.z=-BOX;n.z=1;}
+    if(n.lengthSq()===0){
+      for(const o of all){
+        if(o===b) continue;
+        const d=new THREE.Vector3().subVectors(p,o.flightGroup.position);
+        const dist=d.length();
+        if(dist<COLLISION_RADIUS&&dist>.001){ n.copy(d).normalize(); p.addScaledVector(n,COLLISION_RADIUS-dist); break; }
+      }
+    }
+    if(n.lengthSq()>0){
+      const rf=b.flyDir.clone().sub(n.clone().multiplyScalar(2*b.flyDir.dot(n)));
+      clampFlyDir(rf); b.targetFlyDir=rf.clone(); b.flyDir=rf.clone();
+      b.state='hover'; b.hoverTimer=0;
+    }
+    if(Math.random()<.003){ b.state='hover'; b.hoverTimer=0; pickRandTarget(b); }
+  } else {
+    b.hoverTimer+=dt;
+    b.flyDir.lerp(b.targetFlyDir,TURN_SPEED*2).normalize();
+    if(b.flyDir.distanceTo(b.targetFlyDir)<.05&&b.hoverTimer>HOVER_TIME){
+      b.flyDir.copy(b.targetFlyDir); b.state='fly';
+    }
+  }
+
+  const thy=Math.atan2(b.flyDir.x,b.flyDir.z);
+  const thp=Math.asin(Math.max(-1,Math.min(-.5,b.flyDir.y)));
+  let dy=b.headYaw-thy;
+  while(dy> Math.PI)dy-=Math.PI*2; while(dy<-Math.PI)dy+=Math.PI*2;
+  b.headYaw +=dy*(Math.min(1,TURN_SPEED*3));
+  b.headPitch+=(thp-b.headPitch)*(Math.min(1,TURN_SPEED*3));
+  b.flightGroup.rotation.order='YXZ';
+  b.flightGroup.rotation.y=b.headYaw;
+  b.flightGroup.rotation.x=b.headPitch;
+  b.flightGroup.rotation.z=0;
+  const cr=new THREE.Vector3().crossVectors(b.flyDir,b.targetFlyDir);
+  b.butterfly.rotation.order='YXZ';
+  b.butterfly.rotation.x=sv*.04;
+  b.butterfly.rotation.z=-cr.y*1.5;
+}
+
+// ── 相机 & 触控 ───────────────────────────────────────────────
+let camYaw=.4, camPitch=.3, camDist=60;
+
+// 单指旋转，双指缩放
+let touches={}, lastPinchDist=null;
+
+function getTouchPos(e){ return Array.from(e.touches).map(t=>({id:t.identifier,x:t.clientX,y:t.clientY})); }
+
+canvas.addEventListener('touchstart', e=>{
+  const ts=getTouchPos(e);
+  ts.forEach(t=>{ touches[t.id]=t; });
+  if(e.touches.length===2) lastPinchDist=null;
+},{passive:false});
+
+canvas.addEventListener('touchmove', e=>{
+  e.preventDefault();
+  const ts=getTouchPos(e);
+  if(e.touches.length===1){
+    const cur=ts[0], prev=touches[cur.id];
+    if(prev){
+      camYaw -=(cur.x-prev.x)*.005;
+      camPitch+=(cur.y-prev.y)*.005;
+      camPitch=Math.max(-1.2,Math.min(1.2,camPitch));
+    }
+  } else if(e.touches.length===2){
+    const a=ts[0],b=ts[1];
+    const dist=Math.hypot(a.x-b.x,a.y-b.y);
+    if(lastPinchDist!==null){
+      camDist*=lastPinchDist/dist;
+      camDist=Math.max(5,Math.min(120,camDist));
+    }
+    lastPinchDist=dist;
+  }
+  ts.forEach(t=>{ touches[t.id]=t; });
+},{passive:false});
+
+canvas.addEventListener('touchend', e=>{
+  Array.from(e.changedTouches).forEach(t=>{ delete touches[t.id]; });
+  if(e.touches.length<2) lastPinchDist=null;
+},{passive:false});
+
+// 鼠标（桌面也能用）
+let mdown=false,mlx=0,mly=0;
+canvas.addEventListener('mousedown',e=>{mdown=true;mlx=e.clientX;mly=e.clientY;});
+window.addEventListener('mousemove',e=>{
+  if(!mdown)return;
+  camYaw-=(e.clientX-mlx)*.005; camPitch+=(e.clientY-mly)*.005;
+  camPitch=Math.max(-1.2,Math.min(1.2,camPitch));
+  mlx=e.clientX; mly=e.clientY;
+});
+window.addEventListener('mouseup',()=>{mdown=false;});
+canvas.addEventListener('wheel',e=>{ camDist=Math.max(5,Math.min(120,camDist+e.deltaY*.05)); });
+
+// ── 动画 ──────────────────────────────────────────────────────
+const clock=new THREE.Clock();
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt=Math.min(clock.getDelta(),.05);
+  const t=clock.elapsedTime;
+  for(const b of bflies) updateB(b,dt,t,bflies);
+  camera.position.set(
+    Math.sin(camYaw)*Math.cos(camPitch)*camDist,
+    Math.sin(camPitch)*camDist,
+    Math.cos(camYaw)*Math.cos(camPitch)*camDist
+  );
+  camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
