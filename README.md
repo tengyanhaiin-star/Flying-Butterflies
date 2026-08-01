@@ -23,19 +23,6 @@ A real-time 3D butterfly simulation built with Three.js — no backend, no build
 | Drag (mouse / single finger) | Rotate camera |
 | Scroll wheel / two-finger pinch | Zoom in / out |
 
-## Getting Started
-
-No installation required. Just open the file in any modern browser:
-
-```bash
-git clone https://github.com/tengyanhaiin-star/Flying-Butterflies.git
-cd Flying-Butterflies
-open index.html   # macOS
-# or double-click index.html on Windows / Linux
-```
-
-The only external dependency is Three.js r128, loaded from cdnjs — so an internet connection is needed on first load. After that the browser caches it.
-
 ## How It Works
 
 ### Wing Textures
